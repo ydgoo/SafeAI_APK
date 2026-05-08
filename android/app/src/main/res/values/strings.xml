@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Safe AI</string>
+    <string name="title_activity_main">Safe AI</string>
+    <string name="package_name">com.gemma4.visionchat</string>
+    <string name="custom_url_scheme">com.gemma4.visionchat</string>
+</resources>

@@ -1,0 +1,13 @@
+{
+  "appId": "com.gemma4.visionchat",
+  "appName": "Safe AI",
+  "webDir": "www",
+  "plugins": {
+    "Camera": {
+      "permissions": ["camera", "photos"]
+    }
+  },
+  "android": {
+    "minWebViewVersion": 60
+  }
+}

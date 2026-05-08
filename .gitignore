@@ -1,0 +1,52 @@
+# ── Node.js ───────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# ── Android 빌드 결과물 ───────────────────────
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
+android/capacitor-cordova-android-plugins/
+
+# ── APK (배포용은 별도 관리) ──────────────────
+*.apk
+*.aab
+
+# ── Capacitor 생성 파일 ───────────────────────
+android/app/src/main/assets/public/
+android/app/src/main/assets/capacitor.config.json
+android/app/src/main/assets/capacitor.plugins.json
+
+# ── 환경변수 / API Key ────────────────────────
+.env
+.env.local
+.env.production
+*.env
+
+# ── 운영체제 ──────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── 에디터 ───────────────────────────────────
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# ── 업로드 파일 ──────────────────────────────
+uploads/
+
+# ── API Key 하드코딩 파일 (로컬 전용) ────────
+www/js/bridge.js
+android/app/src/main/java/com/gemma4/visionchat/ClaudePlugin.kt
+
+# ── Claude Code 로컬 설정 ────────────────────
+.claude/
+
+# ── 기타 ─────────────────────────────────────
+*.log
+.cache/
+dist/

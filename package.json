@@ -1,0 +1,21 @@
+{
+  "name": "gemma4-vision-chat",
+  "version": "1.0.0",
+  "description": "On-device Gemma 4 Vision Chat App",
+  "main": "index.js",
+  "scripts": {
+    "dev": "npx serve www -p 3000 --no-clipboard",
+    "sync": "npx cap sync android",
+    "open": "npx cap open android",
+    "build": "cd android && ./gradlew assembleRelease"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.0.0",
+    "@capacitor/camera": "^6.0.0",
+    "@capacitor/core": "^6.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.0.0",
+    "pdf-parse": "^1.1.1"
+  }
+}
