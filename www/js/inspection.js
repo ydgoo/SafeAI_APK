@@ -20,22 +20,28 @@ const Inspection = (() => {
 점검 결과에서 식별된 위험요소에 관련 법령 조항이 어떻게 적용되는지 명확하고 실무적으로 해설하세요.
 한국어로 답변하세요.`;
 
-  let selectedCategory = 'general';
-  let attachedMedia    = null;   // CameraManager에서 받은 미디어 객체
-  let isAnalyzing      = false;
-  let tokenListener    = null;
-  let _lawListener     = null;   // 법령 2차 호출 리스너 (enter 시 정리용)
-  let _lastResultText  = '';     // PDF용 최종 점검 결과 텍스트
-  let _lastLawText     = '';     // PDF용 최종 법령 해설 텍스트
+  let selectedCategory  = 'general';
+  let attachedMedia     = null;   // CameraManager에서 받은 미디어 객체
+  let isAnalyzing       = false;
+  let tokenListener     = null;
+  let _lawListener      = null;   // 법령 2차 호출 리스너 (enter 시 정리용)
+  let _lastResultText   = '';     // PDF용 최종 점검 결과 텍스트
+  let _lastLawText      = '';     // PDF용 최종 법령 해설 텍스트
+  let _selectedProcedure = null;  // 안전점검에 활용할 선택된 작업절차서
 
   // ── 초기화 ─────────────────────────────────────────────────────────
   function init() {
     _bindCategoryChips();
     _bindUploadZone();
     _bindInspectButton();
+    _bindStt();
     document.getElementById('btn-generate-report')?.addEventListener('click', _showReport);
     document.getElementById('btn-report-close')?.addEventListener('click', _hideReport);
     document.getElementById('btn-report-pdf')?.addEventListener('click', _exportPdf);
+    document.getElementById('btn-proc-match-close')?.addEventListener('click', () => {
+      document.getElementById('proc-match-area')?.classList.add('hidden');
+    });
+    document.getElementById('btn-deselect-proc')?.addEventListener('click', _clearProcedure);
   }
 
   // ── 카테고리 칩 ────────────────────────────────────────────────────
@@ -202,6 +208,137 @@ const Inspection = (() => {
     });
   }
 
+  // ── STT (음성 입력) ────────────────────────────────────────────────
+  function _bindStt() {
+    const btn     = document.getElementById('btn-mic');
+    const noteEl  = document.getElementById('inspection-note');
+    const statusEl = document.getElementById('stt-status');
+    if (!btn) return;
+
+    // STT 미지원 기기에서는 버튼 숨김
+    if (typeof STTManager !== 'undefined' && !STTManager.supported) {
+      btn.style.display = 'none';
+      return;
+    }
+
+    btn.addEventListener('click', () => {
+      if (typeof STTManager === 'undefined') {
+        alert('STT 모듈을 불러오지 못했습니다.');
+        return;
+      }
+      if (STTManager.listening) {
+        STTManager.stop();
+        return;
+      }
+
+      _setSttStatus('🎤 듣는 중... (말하세요)', true);
+      let interim = '';
+
+      STTManager.start({
+        onResult: (transcript, isFinal) => {
+          if (isFinal) {
+            if (noteEl) noteEl.value = (noteEl.value ? noteEl.value + ' ' : '') + transcript;
+            interim = '';
+            _setSttStatus('✅ 입력 완료. 관련 절차서를 검색 중...', false);
+            _searchProcedureByText(noteEl?.value || transcript);
+          } else {
+            interim = transcript;
+            if (statusEl) statusEl.textContent = `🎤 ${interim}`;
+          }
+        },
+        onEnd: () => {
+          btn.classList.remove('btn-mic--active');
+          if (statusEl && statusEl.textContent.startsWith('🎤 듣는')) {
+            _setSttStatus('', false);
+          }
+        },
+        onError: (msg) => {
+          btn.classList.remove('btn-mic--active');
+          _setSttStatus(`⚠️ ${msg}`, false);
+          setTimeout(() => _setSttStatus('', false), 3000);
+        }
+      });
+      btn.classList.add('btn-mic--active');
+    });
+  }
+
+  // STT 상태 텍스트 표시
+  // @param msg     표시할 메시지 (빈 문자열이면 숨김)
+  // @param loading 로딩 도트 표시 여부
+  function _setSttStatus(msg, loading) {
+    const el = document.getElementById('stt-status');
+    if (!el) return;
+    if (!msg) { el.classList.add('hidden'); el.textContent = ''; return; }
+    el.classList.remove('hidden');
+    el.textContent = msg;
+  }
+
+  // STT 텍스트로 작업절차서 BM25 검색 후 UI 표시
+  // @param text  검색 쿼리 (STT 결과)
+  async function _searchProcedureByText(text) {
+    if (typeof ProcedureManager === 'undefined' || !text) return;
+    try {
+      const results = await ProcedureManager.search(text, 3);
+      if (results.length === 0) {
+        _setSttStatus('ℹ️ 관련 절차서 없음 (절차서 관리에서 업로드하세요)', false);
+        setTimeout(() => _setSttStatus('', false), 4000);
+        return;
+      }
+      _setSttStatus('', false);
+      _showProcedureMatch(results);
+    } catch (e) {
+      console.error('[Inspection] procedure search error:', e);
+      _setSttStatus('', false);
+    }
+  }
+
+  // 작업절차서 매칭 결과 UI 표시
+  // @param results  [{proc, score}] 배열
+  function _showProcedureMatch(results) {
+    const area    = document.getElementById('proc-match-area');
+    const listEl  = document.getElementById('proc-match-list');
+    if (!area || !listEl) return;
+
+    listEl.innerHTML = results.map(({ proc }) => `
+      <button class="proc-match-item" data-id="${proc.id}">
+        <span class="proc-match-item-title">${_esc(proc.title)}</span>
+        <span class="proc-match-item-select">선택</span>
+      </button>`).join('');
+
+    area.classList.remove('hidden');
+
+    // 절차서 선택 이벤트
+    listEl.querySelectorAll('.proc-match-item').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id  = Number(btn.dataset.id);
+        const hit = results.find(r => r.proc.id === id);
+        if (hit) _selectProcedure(hit.proc);
+        area.classList.add('hidden');
+      });
+    });
+  }
+
+  // 작업절차서 선택 처리
+  // @param proc  절차서 객체 {id, title, fullText, ...}
+  function _selectProcedure(proc) {
+    _selectedProcedure = proc;
+    const badge   = document.getElementById('selected-proc-badge');
+    const titleEl = document.getElementById('selected-proc-title');
+    if (titleEl) titleEl.textContent = proc.title;
+    badge?.classList.remove('hidden');
+  }
+
+  // 선택된 절차서 해제
+  function _clearProcedure() {
+    _selectedProcedure = null;
+    document.getElementById('selected-proc-badge')?.classList.add('hidden');
+  }
+
+  // HTML 이스케이프 (inspection 내부용)
+  function _esc(s) {
+    return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
   // ── AI 분석 실행 ───────────────────────────────────────────────────
   async function _startAnalysis() {
     isAnalyzing = true;
@@ -228,13 +365,25 @@ const Inspection = (() => {
     // 화면 스크롤
     resultSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
+    // 작업절차서 컨텍스트 (선택된 경우에만 포함)
+    const procSection = _selectedProcedure
+      ? `\n\n[작업절차서: ${_selectedProcedure.title}]\n${_selectedProcedure.fullText.slice(0, 2000)}\n`
+      : '';
+
+    // 절차서 준수 섹션 (절차서 선택 시 추가)
+    const procOutputSection = _selectedProcedure
+      ? `\n## 📝 작업절차서 준수 현황\n작업절차서의 주요 단계와 현장 상황을 비교하여 준수/미준수/확인불가 항목을 기술하세요.\n`
+      : '';
+
+    // 절차서 섹션 수 (4 or 5)
+    const sectionCount = _selectedProcedure ? '5' : '4';
+
     // 프롬프트 구성
     const prompt = `당신은 산업안전보건 전문가입니다.
 업로드된 현장 ${attachedMedia.isVideo ? '동영상(첫 프레임)' : '이미지'}를 분석하여 아래 형식으로 안전점검 보고서를 작성해주세요.
 
 점검 분야: ${catLabel}
-${note ? `현장 메모: ${note}` : ''}
-
+${note ? `현장 메모: ${note}` : ''}${procSection}
 ---
 출력 형식(마크다운):
 
@@ -248,8 +397,8 @@ ${note ? `현장 메모: ${note}` : ''}
 
 ## 📋 개선 권고사항
 중장기적으로 개선해야 할 사항을 작성하세요.
----
-위 4개 섹션만 작성하세요. 그 외 추가 섹션(특별 권고사항, 법령 안내 등)은 작성하지 마세요.`;
+${procOutputSection}---
+위 ${sectionCount}개 섹션만 작성하세요. 그 외 추가 섹션(특별 권고사항, 법령 안내 등)은 작성하지 마세요.`;
 
     // 스트리밍 수신
     let fullText  = '';
@@ -448,14 +597,15 @@ ${lawContext}
   }
 
   function _extractSections(markdown) {
-    const out = { riskLevel: '', hazards: '', actions: '', recommendations: '' };
+    const out = { riskLevel: '', hazards: '', actions: '', recommendations: '', procedure: '' };
     const parts = (markdown || '').split(/(?=^## )/m);
     for (const part of parts) {
       const body = _stripMd(part.replace(/^## [^\n]+\n?/, '').trim());
-      if (/종합.?위험도|위험도/.test(part))     out.riskLevel       = body;
-      else if (/위험.?요소/.test(part))          out.hazards         = body;
-      else if (/즉각.?조치|즉시/.test(part))     out.actions         = body;
-      else if (/개선.?권고|권고/.test(part))     out.recommendations = body;
+      if (/종합.?위험도|위험도/.test(part))         out.riskLevel       = body;
+      else if (/위험.?요소/.test(part))              out.hazards         = body;
+      else if (/즉각.?조치|즉시/.test(part))         out.actions         = body;
+      else if (/개선.?권고|권고/.test(part))         out.recommendations = body;
+      else if (/절차서.?준수|준수.?현황/.test(part)) out.procedure       = body;
     }
     return out;
   }
@@ -478,14 +628,15 @@ ${lawContext}
 
   // ── 섹션별 마크다운 추출 (렌더링용, 원본 마크다운 보존) ──────────────
   function _extractSectionsMd(markdown) {
-    const out = { riskLevel: '', hazards: '', actions: '', recommendations: '' };
+    const out = { riskLevel: '', hazards: '', actions: '', recommendations: '', procedure: '' };
     const parts = (markdown || '').split(/(?=^## )/m);
     for (const part of parts) {
       const body = part.replace(/^## [^\n]+\n?/, '').trim();
-      if (/종합.?위험도|위험도/.test(part))     out.riskLevel       = _stripMd(body);
-      else if (/위험.?요소/.test(part))          out.hazards         = body;
-      else if (/즉각.?조치|즉시/.test(part))     out.actions         = body;
-      else if (/개선.?권고|권고/.test(part))     out.recommendations = body;
+      if (/종합.?위험도|위험도/.test(part))         out.riskLevel       = _stripMd(body);
+      else if (/위험.?요소/.test(part))              out.hazards         = body;
+      else if (/즉각.?조치|즉시/.test(part))         out.actions         = body;
+      else if (/개선.?권고|권고/.test(part))         out.recommendations = body;
+      else if (/절차서.?준수|준수.?현황/.test(part)) out.procedure       = body;
     }
     return out;
   }
@@ -530,6 +681,12 @@ ${lawContext}
       <div class="rpt-section rpt-law-section">
         <div class="rpt-section-title">⚖️ 관련 법령</div>
         <div class="rpt-section-body">${lawHtml}</div>
+      </div>` : '';
+
+    const procedureSection = sections.procedure ? `
+      <div class="rpt-section rpt-procedure-section">
+        <div class="rpt-section-title rpt-title-procedure">📝 작업절차서 준수 현황</div>
+        <div class="rpt-section-body">${_md(sections.procedure)}</div>
       </div>` : '';
 
     return `
@@ -583,6 +740,8 @@ ${lawContext}
     <div class="rpt-section-title rpt-title-info">📋 개선 권고사항</div>
     <div class="rpt-section-body">${_md(sections.recommendations) || '<p>—</p>'}</div>
   </div>
+
+  ${procedureSection}
 
   ${lawSection}
 
@@ -676,6 +835,12 @@ ${lawContext}
     _lastLawText    = '';
     const noteEl = document.getElementById('inspection-note');
     if (noteEl) noteEl.value = '';
+
+    // ── STT / 절차서 초기화 ───────────────────────────────────────────
+    if (typeof STTManager !== 'undefined') STTManager.stop();
+    document.getElementById('stt-status')?.classList.add('hidden');
+    document.getElementById('proc-match-area')?.classList.add('hidden');
+    _clearProcedure();
     const btn = document.getElementById('btn-inspect');
     if (btn) { btn.disabled = true; btn.textContent = '점검하기'; }
 

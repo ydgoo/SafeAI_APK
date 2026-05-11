@@ -31,10 +31,11 @@ window.getSettings = getSettings;
 // ── 앱 시작 ──────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
   // 모듈 초기화 (개별 오류가 전체를 막지 않도록 각각 try-catch)
-  try { ApiKeyUI.init(); }       catch (e) { console.warn('ApiKeyUI init:', e); }
-  try { Inspection.init(); }     catch (e) { console.warn('Inspection init:', e); }
-  try { LawViewer.init(); }      catch (e) { console.warn('LawViewer init:', e); }
+  try { ApiKeyUI.init(); }        catch (e) { console.warn('ApiKeyUI init:', e); }
+  try { Inspection.init(); }      catch (e) { console.warn('Inspection init:', e); }
+  try { LawViewer.init(); }       catch (e) { console.warn('LawViewer init:', e); }
   try { SeriousAccident.init(); } catch (e) { console.warn('SeriousAccident init:', e); }
+  try { await ProcedureManager.init(); } catch (e) { console.warn('ProcedureManager init:', e); }
 
   // API Key 여부에 따라 시작 화면 결정
   let hasKey = false;
@@ -81,6 +82,12 @@ function bindNavEvents() {
     showScreen('screen-law');
   });
 
+  // 홈 → 작업절차서 관리
+  document.getElementById('menu-procedure')?.addEventListener('click', async () => {
+    await ProcedureManager.enter();
+    showScreen('screen-procedure');
+  });
+
   // 홈 → 중대재해처벌법
   document.getElementById('menu-serious-accident')?.addEventListener('click', () => {
     SeriousAccident.enter();
@@ -96,6 +103,9 @@ function bindNavEvents() {
     showScreen('screen-home');
   });
   document.getElementById('btn-back-serious-accident')?.addEventListener('click', () => {
+    showScreen('screen-home');
+  });
+  document.getElementById('btn-back-procedure')?.addEventListener('click', () => {
     showScreen('screen-home');
   });
 
